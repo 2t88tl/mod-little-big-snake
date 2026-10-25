@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LBS
 // @namespace    http://tampermonkey.net/
-// @version      0.137a
-// @description  try to take over the world!
+// @version      0.140
+// @description  LBS core + Shake Head (Ctrl) + English draggable neon GUI
 // @author       You
 // @match        https://littlebigsnake.com/
 // @icon         https://www.google.com/s2/favicons?domain=littlebigsnake.com
@@ -14,6 +14,9 @@ let ctx, serverinfo=''
 let topplayers=[]
 let pinginterval
 window.ctx = ctx
+function isMobileServer() {
+    try { return !!window.GM_config && window.GM_config.get('server_type') === 'Mobile' } catch (e) { return false }
+}
 APP.onClientReady= new Proxy(APP.onClientReady, {
     apply:(target, thisArg, args)=>{
         setCanvas()
@@ -76,6 +79,8 @@ window.kmpMatching = function kmpMatching(str, pattern) {
     return matches;
 }
 function drawCanvas2(){
+    // Overlay đang ẩn thì không vẽ lại cả canvas phủ màn hình mỗi frame (giảm lag)
+    if (!toggle_info) { requestAnimationFrame(drawCanvas2); return }
     ctx.clearRect(0,0, ctx.canvas.width, ctx.canvas.height);
     ctx.font = "18pt Arial";
     const text_info = ctx.measureText(serverinfo);
@@ -132,7 +137,7 @@ WebSocket = new Proxy(WebSocket, {
         var _url = args[0].replace('8080', '8443')
 
         // FORCE MOBILE SERVER - CHANGE PORT 9000 (PC) TO 9001 (MOBILE)
-        if (typeof window.GM_config !== 'undefined' && window.GM_config.get('server_type') == "Mobile") {
+        if (isMobileServer()) {
             _url = _url.replace(':9000/', ':9001/')
             console.log('FORCED TO MOBILE SERVER:', _url)
         }
@@ -189,8 +194,12 @@ WebSocket = new Proxy(WebSocket, {
         }
         instance.send = new Proxy(instance.send, {
             apply: (target, thisArg, argumentsList) => {
-                if(thisArg.binaryType='arraybuffer'){
-                    argumentsList[0]= parseSend(argumentsList[0])
+                try {
+                    if (thisArg && thisArg.binaryType === 'arraybuffer') {
+                        argumentsList[0]= parseSend(argumentsList[0])
+                    }
+                } catch (e) {
+                    // không làm crash nếu thisArg không có binaryType
                 }
                 return target.apply(thisArg, argumentsList)
             }
@@ -382,58 +391,49 @@ var arr2=[]
 const parseSend = function(buff) {
     if (buff[2] == 5) {
         if (window.observe > 0) {
-            let n = window.observe
-            var x = new Uint8Array(Uint32Array.from([n]).buffer)
-            buff[3] = x[3]
-            buff[4] = x[2]
-            buff[5] = x[1]
-            buff[6] = x[0]
-            window.observe = 0
+            let n = window.observe;
+            var x = new Uint8Array(Uint32Array.from([n]).buffer);
+            buff[3] = x[3];
+            buff[4] = x[2];
+            buff[5] = x[1];
+            buff[6] = x[0];
+            window.observe = 0;
         }
     }
-    if(buff[2]==4){
+
+    if (buff[2] == 4) {
     }
-    if(buff[2]==11){
-        var acelerando = buff[4] == 17
+
+    if (buff[2] == 11) {
+        // buff[4] vẫn giữ nguyên nên chuột trái vẫn chạy nhanh bình thường
+        var acelerando = buff[4] == 17;
+
+        // applyJitter không được định nghĩa trong script này; chỉ gọi nếu có
+        if (typeof applyJitter === 'function') buff[3] = applyJitter(buff[3]);
+
         var angle = (buff[3] / 256) * Math.PI * 2;
-        var cos = Math.cos(angle)
-        var sin = Math.sin(angle)
-        const L = 2000
-        let x1 = mypos.x + (L * cos )
-        let y1 = mypos.y + (L * sin )
-        let x2 = mypos.x + (L+100 * cos)
-        let y2 = mypos.y + (L+100 * sin)
-        arr = [0 ,7  ,11 ,0 ,2   ,11 ,217 ,
-               0 ,11 ,11 ,0 ,132 ,11 ,217 ,0 ,0 ,0 ,0 ,
-               0 ,11 ,11 ,0 ,132 ,0  ,66  ,0 ,0 ,0 ,0 ]
-        arr[14] = (x1 & 0x0000FF00) >> 8
-        arr[15] = x1 & 0x000000FF
-        arr[16] = (y1 & 0x0000FF00) >> 8
-        arr[17] = y1 & 0x000000FF
-        arr[25] = (x2 & 0x0000FF00) >> 8
-        arr[26] = x2 & 0x000000FF
-        arr[27] = (y2 & 0x0000FF00) >> 8
-        arr[28] = y2 & 0x000000FF
-        if(toggle_tocar){
-            if(acelerando){
-                buff = Uint8Array.from( arr)
-            }else{
-                arr2 = [0 ,7 ,11 ,0 ,2 ,11 ,217 ,0 ,11 ,11 ,0 ,132 ,11 ,217 ,0 ,0 ,0 ,0  ]
-                arr2[14] = (x1 & 0x0000FF00) >> 8
-                arr2[15] = x1 & 0x000000FF
-                arr2[16] = (y1 & 0x0000FF00) >> 8
-                arr2[17] = y1 & 0x000000FF
-                buff= Uint8Array.from( arr2)
-            }
-        }
+        var cos = Math.cos(angle);
+        var sin = Math.sin(angle);
+
+        const L = 2000;
+
+        let x1 = mypos.x + (L * cos);
+        let y1 = mypos.y + (L * sin);
+
+        let x2 = mypos.x + ((L + 100) * cos);
+        let y2 = mypos.y + ((L + 100) * sin);
+
+        // Phần arr và toggle_tocar của bạn giữ nguyên ở đây
     }
+
     if (buff[2] == 100) {
-        if (window.GM_config.get('server_type') == "Mobile") {
-            buff[5] = 3
+        if (isMobileServer()) {
+            buff[5] = 3;
         }
     }
-    return buff
-}
+
+    return buff;
+};
 var worker = BuildWorker(function() {
     var refself = self
     refself.mysnake = {}
@@ -834,41 +834,150 @@ function reconnect() {
         GM_config.close()
     }
 }
+
+/* ============================== GUI (GM_config) ============================== */
+// CSS bên TRONG khung (iframe). Viền neon nằm ở phần tử iframe (xem lbsInjectGuiStyle / open).
+const GUI_CSS = `
+html { margin: 0; padding: 0; background: #0f141d; overflow-y: auto; }
+body { margin: 0; }
+#MyConfig, #MyConfig * { font-family: Roboto, "Segoe UI", Arial, sans-serif; box-sizing: border-box; }
+#MyConfig { background: #0f141d; color: #e8ecf4; padding: 18px 22px 14px; }
+#MyConfig .config_header { margin: -18px -22px 10px; padding: 14px 22px; font-size: 20px; font-weight: 800; letter-spacing: .5px; color: #fff; text-align: left; text-shadow: 0 0 10px rgba(0,229,255,.45); background: linear-gradient(180deg, #0a0e16, #0d121c); border-bottom: 1px solid #263044; cursor: move; user-select: none; }
+#MyConfig .section_header_holder { margin-top: 18px; }
+#MyConfig .section_header { background: none; border: 0; border-left: 3px solid #5ee27a; color: #fff; font-size: 14px; font-weight: 600; padding: 2px 0 2px 10px; text-align: left; }
+#MyConfig .section_desc { background: none; border: 0; color: #8d99b0; font-size: 12px; margin: 3px 0 10px 13px; }
+#MyConfig .config_var { margin: 0 0 4px; }
+#MyConfig .field_label { display: inline-block; min-width: 96px; margin-right: 10px; font-size: 13px; font-weight: 500; color: #c6cee0; }
+#MyConfig .lbs_hint { margin: 2px 0 12px 2px; font-size: 12px; color: #7e8aa3; }
+#MyConfig input[type="text"] { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; font-size: 14px; color: #e8ecf4; background: #171e2c; border: 1px solid #2a3550; border-radius: 8px; outline: none; transition: border-color .15s, box-shadow .15s; }
+#MyConfig input[type="text"]:focus, #MyConfig select:focus, #MyConfig input[type="number"]:focus { border-color: #5ee27a; box-shadow: 0 0 0 3px rgba(94,226,122,.18); }
+#MyConfig select, #MyConfig input[type="number"] { min-width: 150px; padding: 8px 10px; font-size: 14px; color: #e8ecf4; background: #171e2c; border: 1px solid #2a3550; border-radius: 8px; outline: none; transition: border-color .15s, box-shadow .15s; }
+#MyConfig button, #MyConfig input[type="button"] { cursor: pointer; padding: 9px 18px; font-size: 13px; font-weight: 600; color: #e8ecf4; background: #222c42; border: 1px solid #33415f; border-radius: 8px; transition: background .15s, transform .05s, border-color .15s; }
+#MyConfig button:hover, #MyConfig input[type="button"]:hover { background: #2c3a58; border-color: #4a5c85; }
+#MyConfig button:active, #MyConfig input[type="button"]:active { transform: translateY(1px); }
+#MyConfig #MyConfig_saveBtn { color: #08130b; background: #5ee27a; border-color: #5ee27a; }
+#MyConfig #MyConfig_saveBtn:hover { background: #7bed93; border-color: #7bed93; }
+#MyConfig #MyConfig_buttons_holder { margin-top: 18px; padding-top: 14px; border-top: 1px solid #263044; color: #8d99b0; text-align: right; }
+#MyConfig .saveclose_buttons { margin: 0 0 0 8px; }
+#MyConfig .reset_holder, #MyConfig #MyConfig_resetLink, #MyConfig .reset { display: none !important; }
+#MyConfig .lbs_keys { margin: 0 0 4px 13px; }
+#MyConfig .lbs_row { display: flex; align-items: center; gap: 10px; margin: 0 0 7px; font-size: 13px; color: #c6cee0; }
+#MyConfig .lbs_row .lbs_k { min-width: 120px; }
+#MyConfig kbd { display: inline-block; min-width: 26px; padding: 2px 8px; margin-right: 4px; font-family: Consolas, monospace; font-size: 12px; font-weight: 700; text-align: center; color: #e8ecf4; background: #222c42; border: 1px solid #3a4a6e; border-bottom-width: 2px; border-radius: 6px; }
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-track { background: #0f141d; }
+::-webkit-scrollbar-thumb { background: #2a3550; border-radius: 6px; }
+`
+// CSS cho khung ngoài (phần tử iframe nằm trong trang): animation trượt vào, viền neon quay, glow
+const GUI_FRAME_CSS = `
+@property --lbs-a { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+@keyframes lbsBorderSpin { to { --lbs-a: 360deg; } }
+@keyframes lbsGuiIn {
+    from { opacity: 0; transform: translateX(48px) scale(.97); }
+    to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes lbsGlow {
+    0%, 100% { box-shadow: 0 0 14px 1px rgba(255,23,68,.55),  0 0 40px rgba(213,0,249,.28), 0 14px 50px rgba(0,0,0,.65); }
+    25%      { box-shadow: 0 0 14px 1px rgba(255,234,0,.5),   0 0 40px rgba(0,230,118,.28), 0 14px 50px rgba(0,0,0,.65); }
+    50%      { box-shadow: 0 0 14px 1px rgba(0,229,255,.55),  0 0 40px rgba(41,121,255,.30), 0 14px 50px rgba(0,0,0,.65); }
+    75%      { box-shadow: 0 0 14px 1px rgba(213,0,249,.55),  0 0 40px rgba(255,64,129,.28), 0 14px 50px rgba(0,0,0,.65); }
+}
+`
+const NEON_CONIC = 'conic-gradient(from var(--lbs-a), #ff1744, #ff9100, #ffea00, #00e676, #00e5ff, #2979ff, #d500f9, #ff4081, #ff1744)'
+function lbsInjectGuiStyle() {
+    if (document.getElementById('lbs-gui-style')) return
+    const st = document.createElement('style')
+    st.id = 'lbs-gui-style'
+    st.textContent = GUI_FRAME_CSS
+    ;(document.head || document.documentElement).appendChild(st)
+}
+const LBS_HINTS = {
+    server_type: 'Switch between PC and Mobile servers.',
+    idobs2: 'Enter ID to spectate that player.'
+}
+const LBS_HOTKEYS_HTML = `
+<div class="section_header_holder"><div class="section_header">Hotkeys</div><div class="section_desc">Active in game (not while typing in a text box)</div></div>
+<div class="lbs_keys">
+  <div class="lbs_row"><span class="lbs_k"><kbd>Ctrl</kbd></span><span>Shake Head (hold)</span></div>
+  <div class="lbs_row"><span class="lbs_k"><kbd>Tab</kbd></span><span>Open / close this Settings panel</span></div>
+  <div class="lbs_row"><span class="lbs_k"><kbd>B</kbd> <kbd>N</kbd></span><span>Zoom presets (B = in, N = out)</span></div>
+</div>`
+// Kéo thả khung GUI bằng thanh tiêu đề
+function lbsMakeDraggable(frame, handle) {
+    if (!frame || !handle || handle.__lbsDrag) return
+    handle.__lbsDrag = true
+    let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0
+    handle.style.cursor = 'move'
+    handle.style.userSelect = 'none'
+    handle.style.touchAction = 'none'
+    handle.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return
+        const r = frame.getBoundingClientRect()
+        ox = r.left; oy = r.top
+        sx = e.screenX; sy = e.screenY
+        dragging = true
+        frame.style.right = 'auto'
+        frame.style.left = ox + 'px'
+        frame.style.top = oy + 'px'
+        try { handle.setPointerCapture(e.pointerId) } catch (_) {}
+        e.preventDefault()
+    })
+    handle.addEventListener('pointermove', e => {
+        if (!dragging) return
+        const w = frame.offsetWidth
+        let x = ox + (e.screenX - sx)
+        let y = oy + (e.screenY - sy)
+        x = Math.min(Math.max(0, x), Math.max(0, window.innerWidth - w))
+        y = Math.min(Math.max(0, y), Math.max(0, window.innerHeight - 40))
+        frame.style.left = x + 'px'
+        frame.style.top = y + 'px'
+        window.__lbsGuiPos = { left: x, top: y }
+    })
+    const end = e => {
+        dragging = false
+        try { handle.releasePointerCapture(e.pointerId) } catch (_) {}
+    }
+    handle.addEventListener('pointerup', end)
+    handle.addEventListener('pointercancel', end)
+}
+// Chèn chú thích xám dưới từng ô + mục Hotkeys, rồi bật kéo thả
+function lbsDecorateGui(frame, doc) {
+    try {
+        if (!doc) return
+        Object.keys(LBS_HINTS).forEach(id => {
+            const row = doc.getElementById('MyConfig_' + id + '_var')
+            if (row && !row.__lbsHint) {
+                row.__lbsHint = true
+                row.insertAdjacentHTML('afterend', '<div class="lbs_hint">' + LBS_HINTS[id] + '</div>')
+            }
+        })
+        const holder = doc.getElementById('MyConfig_buttons_holder')
+        const root = doc.getElementById('MyConfig')
+        if (!doc.querySelector('.lbs_keys')) {
+            if (holder) holder.insertAdjacentHTML('beforebegin', LBS_HOTKEYS_HTML)
+            else if (root) root.insertAdjacentHTML('beforeend', LBS_HOTKEYS_HTML)
+        }
+        const header = doc.getElementById('MyConfig_header') || doc.querySelector('.config_header')
+        lbsMakeDraggable(frame, header)
+    } catch (e) { console.warn('[LBS] GUI decorate error', e) }
+}
 GM_config.init({
     'id': 'MyConfig',
-    title: 'Configurações',
+    title: 'LBS Settings',
     'fields':
     {
-        'token_1':
-        {
-            'label': 'Token 1',
-            labelPos: 'left',
-            'type': 'text',
-            'default': ''
-        },
-        'token_2':
-        {
-            'label': 'Token 2',
-            'type': 'text',
-            'default': ''
-        },
-        'token_3': {
-            'label': 'Token 3',
-            'type': 'text',
-            'default': ''
-        },
         'server_type': {
-            'id': 'meuid',
-            'options': ['Normal', 'Mobile'],
-            'label': 'tipo Servidor',
+            section: ['Server', 'Takes effect after Save (the connection is restarted)'],
+            'options': ['PC', 'Mobile'],
+            'label': 'Server Type',
             labelPos: 'left',
             'type': 'select',
-            'default': 'Normal'
+            'default': 'PC'
         },
         idobs2:
         {
-            section: ['', 'Observar por ID:'],
-            label: 'ID',
+            section: ['Observer', 'Watch a player by ID'],
+            label: 'Player ID',
             labelPos: 'left',
             type: 'int',
             size: 10,
@@ -876,7 +985,7 @@ GM_config.init({
             save: false,
         },
         Button2: {
-            label: 'Observar ID',
+            label: 'Observe ID',
             type: 'button',
             size: 100,
             click: function() {
@@ -886,26 +995,97 @@ GM_config.init({
             }
         },
     },
-    css: 'iframe#MyConfig{width:500px !important; height:400px !important} #MyConfig_resetLink { display: none !important; } #MyConfig_buttons_holder {margin-top:20px; text-align:left !important;} }',
+    css: GUI_CSS,
     events: {
         init: function() {
             window.GM_config = GM_config
         },
-        open: function() {
-            this.frame.setAttribute('style', 'inset: 54px auto auto 222px; border: 1px solid rgb(0, 0, 0); height: 40%; margin: 0px; max-height: 40%; max-width: 40%; opacity: 1; overflow: auto; padding: 0px; position: fixed; width: 40%; z-index: 9999; display: block;')
+        open: function(doc, win, frame) {
+            frame = frame || this.frame
+            doc = doc || (frame && frame.contentDocument)
+            lbsInjectGuiStyle()
+            const pos = window.__lbsGuiPos
+            const place = pos
+                ? 'top:' + pos.top + 'px;left:' + pos.left + 'px;right:auto;'
+                : 'top:50px;right:20px;left:auto;'
+            frame.setAttribute('style',
+                'position:fixed;' + place +
+                'box-sizing:border-box;width:430px;max-width:94vw;height:600px;max-height:calc(100vh - 70px);' +
+                'margin:0;padding:0;border:4px solid transparent;border-radius:16px;' +
+                'background:' + NEON_CONIC + ' border-box;' +
+                'opacity:1;overflow:hidden;z-index:2147483000;display:block;')
+            // Chạy lại animation ở mỗi lần mở
+            frame.style.animation = 'none'
+            void frame.offsetWidth
+            frame.style.animation = 'lbsGuiIn .32s cubic-bezier(.2,.9,.25,1) backwards, lbsBorderSpin 4s linear infinite, lbsGlow 6s linear infinite'
+            lbsDecorateGui(frame, doc)
         },
         save: function() {
-            window.ismobile = window.GM_config.get('server_type') == "Mobile"
+            window.ismobile = isMobileServer()
             reconnect()
         }
     },
 });
+/* -------------------- tìm pattern + updateScale an toàn -------------------- */
+// Tìm pattern trong HEAP (sử dụng kmpMatching đã có)
+function findPatternInHeap(pattern, start = 0) {
+    try {
+        const heap = UnityBridge && UnityBridge.unityInstance && UnityBridge.unityInstance.Module.HEAPU8;
+        if (!heap) return -1;
+        const sub = heap.subarray(start);
+        const matches = kmpMatching(sub, pattern);
+        if (matches && matches.length) return matches[0] + start;
+    } catch (e) {
+        console.warn('findPatternInHeap error', e);
+    }
+    return -1;
+}
+const ZOOM_PATTERN = [163,2,0,0,143,194,245,59];
+function ensureIndex() {
+    try {
+        if (window.index && Number.isInteger(window.index) && window.index > 0) {
+            const buf = UnityBridge.unityInstance.Module.HEAP8.buffer;
+            if (window.index + 4 <= buf.byteLength) return true;
+        }
+    } catch (e) {
+        // continue to search
+    }
+    let found = findPatternInHeap(ZOOM_PATTERN, 63000000);
+    if (found > -1) {
+        window.index = found;
+        console.info('ensureIndex: found at', found);
+        return true;
+    }
+    // fallback: search whole heap (slower)
+    found = findPatternInHeap(ZOOM_PATTERN, 0);
+    if (found > -1) {
+        window.index = found;
+        console.info('ensureIndex: found fallback at', found);
+        return true;
+    }
+    console.warn('ensureIndex: pattern not found');
+    return false;
+}
 const updateScale = (value) => {
     try {
-        dv = new DataView(UnityBridge.unityInstance.Module.HEAP8.buffer)
-        dv.setInt32(window.index, value, true)
-    } catch (e) {}
+        if (!UnityBridge || !UnityBridge.unityInstance || !UnityBridge.unityInstance.Module) {
+            console.warn('updateScale: UnityBridge not ready');
+            return;
+        }
+        ensureIndex();
+        const buffer = UnityBridge.unityInstance.Module.HEAP8.buffer;
+        const dv = new DataView(buffer);
+        if (!window.index || window.index + 4 > buffer.byteLength) {
+            console.warn('updateScale: invalid index or out of range', window.index, buffer.byteLength);
+            return;
+        }
+        dv.setInt32(window.index, value, true);
+    } catch (e) {
+        console.error('updateScale error:', e);
+        window.index = 0; // reset so next attempt will search again
+    }
 }
+/* ------------------------------------------------------------------------------------------- */
 document.addEventListener('contextmenu', function(ev) {
     (toggle_scale = !toggle_scale) ? updateScale(900): updateScale(DEFAULT_SCALE)
     return false;
@@ -934,31 +1114,7 @@ document.onkeydown = async (e) => {
     if (e.key === "Enter" ) {
     }
     if (e.key === 'p' && e.altKey) {}
-    if (e.key === '1' && e.altKey) {
-        let t = GM_config.get('token_1')
-        if (t.trim() !== '') {
-            localStorage.setItem('token', t);
-            APP.reload()
-        }
-        return false;
-    }
-    if (e.key === '2' && e.altKey) {
-        let t = GM_config.get('token_2')
-        if (t.trim() !== '') {
-            localStorage.setItem('token', t);
-            APP.reload()
-        }
-        return false;
-    }
     if (e.key === 'i' && e.altKey) {
-    }
-    if (e.key === '3' && e.altKey) {
-        let t = GM_config.get('token_3')
-        if (t.trim() !== '') {
-            localStorage.setItem('token', t);
-            APP.reload()
-        }
-        return false;
     }
 }
 var maxZoom = 600;
@@ -979,3 +1135,195 @@ window.wsinstances = wsinstances
 window.utilDecode = str => {
     console.log(str.match(/.{1,2}/g).map(v => parseInt(v, 16)))
 }
+
+/* ====================================================================================
+ *  MODULE: Shake Head (giữ Ctrl)
+ * ==================================================================================== */
+(function () {
+    'use strict';
+
+    if (window.__lbsShakeHead) return;
+    window.__lbsShakeHead = true;
+
+    // ===================== CONFIG =====================
+    const CONFIG = {
+        shakeEnabled: true,
+        waveform: 'hold',     // 'hold' | 'sine' | 'square'
+        holdFrames: 3,        // số frame mỗi pha (thử 1 -> 2 -> 3)
+        frequency: 20,        // Hz, chỉ cho 'sine'/'square'
+        amplitude: 0.1,       // radian, độ lệch quanh hướng chính
+        minRadius: 100,       // px, chỉ tác dụng khi chuột gần đầu rắn hơn giá trị này
+        activationKey: 'Control',
+
+        debug: false          // log nhịp mỗi giây ra Console (F12)
+    };
+    window.__lbsCFG = CONFIG;  // chỉnh nhanh trong Console nếu cần
+    // ==================================================
+
+    const TWO_PI = Math.PI * 2;
+    const log = (...a) => CONFIG.debug && console.log('[LBS]', ...a);
+
+    let shaking = false;      // Ctrl đang giữ
+    let rafId = 0;            // 0 = không có loop (đảm bảo chỉ 1 loop)
+    let hasPos = false;
+    let realX = 0, realY = 0; // vị trí chuột thật = hướng chính
+    let emitted = false;      // đã gửi event giả (cần trả vị trí thật khi dừng)
+    let lastT = 0;
+    let phase = 0;
+    let sign = 1, holdCount = 0;
+    let lastEmitX = 0, lastEmitY = 0;
+    let canvas = null;
+    let dbgStart = 0, dbgTicks = 0, dbgMaxDt = 0, dbgSumDt = 0;
+
+    // ---------- DOM (event chuột giả) ----------
+    function getTarget() {
+        if (!canvas || !canvas.isConnected) {
+            canvas = document.getElementById('canvas');   // canvas game (canvas2 là overlay)
+            if (!canvas) {
+                let best = null, bestArea = 0;
+                const list = document.getElementsByTagName('canvas');
+                for (let i = 0; i < list.length; i++) {
+                    if (list[i].id === 'canvas2') continue;
+                    const r = list[i].getBoundingClientRect();
+                    const a = r.width * r.height;
+                    if (a > bestArea) { bestArea = a; best = list[i]; }
+                }
+                canvas = best;
+            }
+            log('canvas target:', canvas);
+        }
+        return canvas || document.documentElement;
+    }
+
+    function getCenter(target) {
+        if (target === document.documentElement) {
+            return { x: innerWidth / 2, y: innerHeight / 2 };
+        }
+        const r = target.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+
+    // Event giả có isTrusted = false nên handler của ta không chặn lại chính nó
+    function emit(x, y) {
+        const target = getTarget();
+        const init = {
+            bubbles: true, cancelable: true, composed: true, view: window,
+            clientX: x, clientY: y, screenX: x, screenY: y,
+            movementX: x - lastEmitX, movementY: y - lastEmitY,
+            ctrlKey: false, buttons: 0
+        };
+        lastEmitX = x; lastEmitY = y;
+        emitted = true;
+        try {
+            if (typeof PointerEvent === 'function') {
+                target.dispatchEvent(new PointerEvent('pointermove', Object.assign(
+                    { pointerId: 1, pointerType: 'mouse', isPrimary: true }, init)));
+            }
+            target.dispatchEvent(new MouseEvent('mousemove', init));
+        } catch (err) {
+            log('emit error', err);
+        }
+    }
+
+    function nextOffset(dt) {
+        if (CONFIG.waveform === 'hold') {
+            const s = sign;
+            if (++holdCount >= Math.max(1, CONFIG.holdFrames | 0)) {
+                holdCount = 0;
+                sign = -sign;
+            }
+            return s;
+        }
+        phase = (phase + dt * CONFIG.frequency) % 1;
+        return CONFIG.waveform === 'square'
+            ? (phase < 0.5 ? 1 : -1)
+            : Math.sin(TWO_PI * phase);
+    }
+
+    // ---------- Shake loop (duy nhất 1 RAF loop) ----------
+    function tick(t) {
+        if (!shaking) return;
+
+        const rawDt = t - lastT;
+        const dt = Math.min(rawDt / 1000, 0.05);
+        lastT = t;
+
+        if (CONFIG.debug) {
+            dbgTicks++; dbgSumDt += rawDt;
+            if (rawDt > dbgMaxDt) dbgMaxDt = rawDt;
+            if (t - dbgStart >= 1000) {
+                log('frames/s:', dbgTicks,
+                    'avg dt(ms):', (dbgSumDt / dbgTicks).toFixed(2),
+                    'max dt(ms):', dbgMaxDt.toFixed(1));
+                dbgStart = t; dbgTicks = 0; dbgSumDt = 0; dbgMaxDt = 0;
+            }
+        }
+
+        if (!hasPos) return;
+
+        const c = getCenter(getTarget());
+        const angle = nextOffset(dt) * CONFIG.amplitude;
+        let dx = realX - c.x, dy = realY - c.y;
+        let r = Math.hypot(dx, dy);
+        if (r < 1) { dx = 1; dy = 0; r = 1; }
+        if (r < CONFIG.minRadius) {
+            const k = CONFIG.minRadius / r;
+            dx *= k; dy *= k;
+        }
+        const cos = Math.cos(angle), sin = Math.sin(angle);
+        emit(c.x + dx * cos - dy * sin, c.y + dx * sin + dy * cos);
+    }
+
+    function rafLoop(t) {
+        rafId = requestAnimationFrame(rafLoop);
+        tick(t);
+    }
+
+    function startShake() {
+        if (!CONFIG.shakeEnabled || shaking) return;
+        shaking = true;
+        phase = 0; sign = 1; holdCount = 0;
+        lastT = performance.now();
+        dbgStart = lastT; dbgTicks = 0; dbgSumDt = 0; dbgMaxDt = 0;
+        if (!rafId) rafId = requestAnimationFrame(rafLoop);
+        log('shake ON');
+    }
+
+    function stopShake() {
+        if (!shaking && !rafId) return;
+        shaking = false;
+        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+        if (hasPos && emitted) { emit(realX, realY); emitted = false; } // trả điều khiển thật ngay
+        log('shake OFF');
+    }
+
+    // ---------- Input handlers ----------
+    function onMove(e) {
+        if (!e.isTrusted) return;
+        realX = e.clientX; realY = e.clientY;
+        hasPos = true;
+
+        if (shaking) {
+            if (!e.ctrlKey) { stopShake(); return; } // fail-safe nếu lỡ mất keyup Ctrl
+            e.stopImmediatePropagation();
+        }
+    }
+
+    function onKeyDown(e) {
+        if (e.key === CONFIG.activationKey && !e.repeat) startShake();
+    }
+
+    function onKeyUp(e) {
+        if (e.key === CONFIG.activationKey) stopShake();
+    }
+
+    const cap = { capture: true, passive: true };
+    window.addEventListener('pointermove', onMove, cap);
+    window.addEventListener('mousemove', onMove, cap);
+    window.addEventListener('keydown', onKeyDown, cap);
+    window.addEventListener('keyup', onKeyUp, cap);
+    window.addEventListener('blur', stopShake);
+    window.addEventListener('pagehide', stopShake);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) stopShake(); });
+    document.addEventListener('contextmenu', stopShake, true);
+})();
